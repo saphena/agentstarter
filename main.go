@@ -13,20 +13,48 @@ package main
  *
  */
 import (
+	"encoding/xml"
+	"flag"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/micmonay/keybd_event"
 )
 
+var helpWanted *bool = flag.Bool("?", false, "Show help")
+
 const waitforseconds time.Duration = 20 // A suitable interval, not too long, not too short
+
+type Camera struct {
+	Name  string `xml:"name,attr"`
+	URL   string `xml:"settings>substream"`
+	Login string `xml:"settings>login"`
+}
+
+type Cameras struct {
+	XMLName xml.Name `xml:"objects"`
+	C       []Camera `xml:"cameras>camera"`
+}
+
+type Data struct {
+	Field1 string `xml:"field1"`
+	Field2 string `xml:"field2"`
+}
 
 func main() {
 
 	fmt.Printf("AgentStarter - custom written for Wiltshires garage, Liphook\nCopyright (c) 2021 Bob Stammers\n\n")
+	flag.Parse()
+
+	if *helpWanted {
+		showhelp()
+		return
+	}
 
 	waitforagent() // Wait until the Agent server up and running
 
@@ -57,6 +85,39 @@ func main() {
 
 	time.Sleep(waitforseconds * time.Second) // Stay alive long enough for that [Esc] to do its thing
 
+}
+
+func showhelp() {
+	const agentXML = `C:\Program Files\Agent\Media\XML\objects.xml`
+	const txt = `The cameras, TP_Link Tapo C100s, are controlled by Agent DVR service (https://www.ispyconnect.com/download.aspx) which is configured using its browser menu.
+
+Each camera needs a 'Camera Account' configured using the Tapo phone app, userid is probably 'saphena' with the usual password but see below.
+
+Agent actually stores its configuration in %v
+
+This program, AgentStarter, needs no configuration. It waits until it can see that Agent is serving then fires
+up Microsoft Edge running in kiosk mode to present the output feeds.
+
+`
+	fmt.Printf(txt, agentXML)
+
+	b, err := ioutil.ReadFile(agentXML)
+	if err != nil {
+		return
+	}
+
+	b = []byte(strings.Replace(string(b), ` encoding="utf-16"`, ``, 1))
+	//fmt.Printf("Unmarshalling ...\n")
+	c := Cameras{}
+	err = xml.Unmarshal(b, &c)
+	if err != nil {
+		fmt.Printf("error: %v", err)
+		return
+	}
+	for _, cc := range c.C {
+		fmt.Printf("Camera '%v' = %v [%v]\n", cc.Name, cc.URL, cc.Login)
+	}
+	fmt.Println()
 }
 
 func waitforagent() {
