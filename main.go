@@ -10,15 +10,19 @@ package main
  * a web browser in kiosk mode and deal with anything which would otherwise need human intervention.
  *
  * v1.0		23Mar21	Live release to Wiltshires
+ * v1.1		22Apr21 Help function + email alerts
  *
  */
 import (
+	"crypto/tls"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net"
+	"net/mail"
+	"net/smtp"
 	"os/exec"
 	"strings"
 	"time"
@@ -41,11 +45,6 @@ type Cameras struct {
 	C       []Camera `xml:"cameras>camera"`
 }
 
-type Data struct {
-	Field1 string `xml:"field1"`
-	Field2 string `xml:"field2"`
-}
-
 func main() {
 
 	fmt.Printf("AgentStarter - custom written for Wiltshires garage, Liphook\nCopyright (c) 2021 Bob Stammers\n\n")
@@ -56,7 +55,11 @@ func main() {
 		return
 	}
 
+	sendmail("Starting")
+
 	waitforagent() // Wait until the Agent server up and running
+
+	sendmail("Launching browser")
 
 	cmd := exec.Command("cmd", "/C", "start msedge --kiosk http://localhost:8090 --edge-kiosk-type=fullscreen")
 
@@ -87,6 +90,86 @@ func main() {
 
 }
 
+func sendmail(msg string) { // msg is used for subject and body so keep it short
+
+	from := mail.Address{Name: "Wiltshires/Bobby", Address: "robot@pikit.co.uk"}
+	to := mail.Address{Name: "", Address: "stammers.bob@gmail.com"}
+	subj := msg
+	body := msg
+
+	// Setup headers
+	headers := make(map[string]string)
+	headers["From"] = from.String()
+	headers["To"] = to.String()
+	headers["Subject"] = subj
+	headers["Date"] = time.Now().Format("Mon, 02 Jan 2006 15:04:05 -0700")
+
+	// Setup message
+	message := ""
+	for k, v := range headers {
+		message += fmt.Sprintf("%s: %s\r\n", k, v)
+	}
+	message += "\r\n" + body
+
+	// Connect to the SMTP Server
+	servername := "smtp.livemail.co.uk:465"
+
+	host, _, _ := net.SplitHostPort(servername)
+
+	auth := smtp.PlainAuth("", "robot@pikit.co.uk", "vs4hHpJS6", host)
+
+	// TLS config
+	tlsconfig := &tls.Config{
+		InsecureSkipVerify: false,
+		ServerName:         host,
+	}
+
+	// Here is the key, you need to call tls.Dial instead of smtp.Dial
+	// for smtp servers running on 465 that require an ssl connection
+	// from the very beginning (no starttls)
+	conn, err := tls.Dial("tcp", servername, tlsconfig)
+	if err != nil {
+		panic(err)
+	}
+
+	c, err := smtp.NewClient(conn, host)
+	if err != nil {
+		panic(err)
+	}
+
+	// Auth
+	if err = c.Auth(auth); err != nil {
+		panic(err)
+	}
+
+	// To && From
+	if err = c.Mail(from.Address); err != nil {
+		panic(err)
+	}
+
+	if err = c.Rcpt(to.Address); err != nil {
+		panic(err)
+	}
+
+	// Data
+	w, err := c.Data()
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = w.Write([]byte(message))
+	if err != nil {
+		panic(err)
+	}
+
+	err = w.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	c.Quit()
+
+}
 func showhelp() {
 	const agentXML = `C:\Program Files\Agent\Media\XML\objects.xml`
 	const txt = `The cameras, TP_Link Tapo C100s, are controlled by Agent DVR service (https://www.ispyconnect.com/download.aspx) which is configured using its browser menu.
@@ -106,6 +189,7 @@ up Microsoft Edge running in kiosk mode to present the output feeds.
 		return
 	}
 
+	// The file claims to be utf16 but is actually utf8
 	b = []byte(strings.Replace(string(b), ` encoding="utf-16"`, ``, 1))
 	//fmt.Printf("Unmarshalling ...\n")
 	c := Cameras{}
@@ -118,6 +202,7 @@ up Microsoft Edge running in kiosk mode to present the output feeds.
 		fmt.Printf("Camera '%v' = %v [%v]\n", cc.Name, cc.URL, cc.Login)
 	}
 	fmt.Println()
+	sendmail("Testing")
 }
 
 func waitforagent() {
@@ -129,6 +214,7 @@ func waitforagent() {
 		"remain calm, all will be well",
 		"haven't you got something to be getting on with?",
 		"any minute now",
+		"hang on a bit",
 		"it'll take longer if you watch",
 		"all things come to those who wait"}
 
